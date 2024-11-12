@@ -1,0 +1,5 @@
+[default]
+entity = snubhcvc
+project = nvs
+base_url = https://api.wandb.ai
+
