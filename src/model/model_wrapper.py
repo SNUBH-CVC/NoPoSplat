@@ -41,6 +41,7 @@ from ..visualization.layout import add_border, hcat, vcat
 from ..visualization.validation_in_3d import render_cameras, render_projections
 from .decoder.decoder import Decoder, DepthRenderingMode
 from .encoder import Encoder
+from .ply_export import export_ply
 from .encoder.visualization.encoder_visualizer import EncoderVisualizer
 
 
@@ -87,9 +88,9 @@ class TrajectoryFn(Protocol):
 
 class ModelWrapper(LightningModule):
     logger: Optional[WandbLogger]
-    encoder: nn.Module
+    encoder: nn.Module  # noposplat
     encoder_visualizer: Optional[EncoderVisualizer]
-    decoder: Decoder
+    decoder: Decoder  # splatting_cuda
     losses: nn.ModuleList
     optimizer_cfg: OptimizerCfg
     test_cfg: TestCfg
@@ -220,12 +221,14 @@ class ModelWrapper(LightningModule):
             print(f"Test step {batch_idx:0>6}.")
 
         # Render Gaussians.
+        visualization_dump = {}
         with self.benchmarker.time("encoder"):
             gaussians = self.encoder(
                 batch["context"],
                 self.global_step,
+                visualization_dump=visualization_dump,
             )
-
+        
         # align the target pose
         if self.test_cfg.align_pose:
             output = self.test_step_align(batch, gaussians)
@@ -262,6 +265,16 @@ class ModelWrapper(LightningModule):
         name = get_cfg()["wandb"]["name"]
         path = self.test_cfg.output_path / name
         if self.test_cfg.save_image:
+            export_ply(
+                batch["context"]["extrinsics"][0, 0],
+                gaussians.means[0],
+                visualization_dump["scales"][0],
+                visualization_dump["rotations"][0],
+                gaussians.harmonics[0],
+                gaussians.opacities[0],
+                path / scene / f"{batch_idx:0>6}.ply",
+            )
+
             for index, color in zip(batch["target"]["index"][0], output.color[0]):
                 save_image(color, path / scene / f"color/{index:0>6}.png")
 
@@ -614,6 +627,8 @@ class ModelWrapper(LightningModule):
 
         # Since the PyTorch Lightning doesn't support video logging, log to wandb directly.
         try:
+            if not wandb.run:
+                wandb.init(project="NVS")
             wandb.log(visualizations)
         except Exception:
             assert isinstance(self.logger, LocalLogger)

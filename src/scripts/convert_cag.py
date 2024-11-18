@@ -11,8 +11,8 @@ from jaxtyping import Float, Int, UInt8
 from torch import Tensor
 from tqdm import tqdm
 
-INPUT_IMAGE_DIR = Path("/workspaces/NoPoSplat/datasets/DL3DV-ALL-480P")
-OUTPUT_DIR = Path("/workspaces/NoPoSplat/datasets/DL3DV-ALL-480P/Chunks")
+INPUT_IMAGE_DIR = Path("/workspaces/NoPoSplat/datasets/cag")
+OUTPUT_DIR = Path("/workspaces/NoPoSplat/datasets/cag_chunks")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Target 100 MB per chunk.
@@ -20,17 +20,7 @@ TARGET_BYTES_PER_CHUNK = int(1e8)
 
 
 def get_example_keys(stage: Literal["test", "train"]) -> list[str]:
-    subsets = ['1K', '2K', '3K', '4K', '5K', '6K', '7K', '8K', '9K', '10K', '11K']
-    keys = []
-    for subset in subsets:
-        subdir = INPUT_IMAGE_DIR / subset
-        # iterate through all the subdirectories
-        for key in subdir.iterdir():
-            if key.is_dir():
-                item = key.name.split('/')[-1]
-                item = '/'.join([subset, item])
-                print(item)
-                keys.append(item)
+    keys = [i.stem for i in INPUT_IMAGE_DIR.glob("*")]
 
     keys.sort()
     return keys
@@ -46,15 +36,15 @@ def load_raw(path: Path) -> UInt8[Tensor, " length"]:
 
 
 def load_images(example_path: Path) -> dict[str, UInt8[Tensor, "..."]]:
-    """Load JPG images as raw bytes (do not decode)."""
-
-    return {path.stem: load_raw(path) for path in example_path.iterdir()}
+    """Load JPG/PNG images as raw bytes (do not decode)."""
+    return {path.stem: load_raw(path) for path in example_path.iterdir() if path.suffix == ".png"}
 
 
 class Metadata(TypedDict):
-    url: str
-    timestamps: Int[Tensor, " camera"]
-    cameras: Float[Tensor, "camera entry"]
+    patient_id: str
+    study_date: str
+    timestamps: Int[Tensor, " frame"]
+    cameras: Float[Tensor, "frame entry"]
 
 
 class Example(Metadata):
@@ -62,49 +52,38 @@ class Example(Metadata):
     images: list[UInt8[Tensor, "..."]]
 
 
-def opengl_c2w_to_opencv_w2c(c2w: np.ndarray) -> np.ndarray:
-    c2w = c2w.copy()
-    c2w[2, :] *= -1
-    c2w = c2w[np.array([1, 0, 2, 3]), :]
-    c2w[0:3, 1:3] *= -1
-    w2c_opencv = np.linalg.inv(c2w)
-    return w2c_opencv
-
-
-def load_metadata(file_path: Path) -> Metadata:
+def load_image_and_metadata(file_path: Path) -> Metadata:
     with open(file_path, 'r') as file:
         data = json.load(file)
 
-    url = ""
+    patient_id = data["patient_id"]
+    study_date = data["study_date"]
 
-    timestamps = []
     cameras = []
+    timestamps = []
+    images = []
+    
+    for i, frame in enumerate(data["frames"]):
+        timestamps.append(i)
 
-    # FIXME: igore k1, k2, p1, p2, is this proper?
-    w = data['w']
-    h = data['h']
-    intrinsic = [data['fl_x'] / w, data['fl_y'] / h, data['cx'] / w, data['cy'] / h, 0.0, 0.0]
-    intrinsic = np.array(intrinsic, dtype=np.float32)
+        intrinsic = np.array(frame["intrinsic_matrix"], dtype=np.float32)
+        extrinsic = np.eye(4, dtype=np.float32)  # Placeholder: Adjust based on your requirements.
 
-    for frame in data['frames']:
-        # extract number from string like "images/frame_00002.png"
-        frame_id = int(frame['file_path'].split('_')[-1].split('.')[0])
-        timestamps.append(frame_id)
-        extrinsic = frame['transform_matrix']
-        extrinsic = np.array(extrinsic, dtype=np.float32)
-        w2c = opengl_c2w_to_opencv_w2c(extrinsic)
-        w2c = w2c[:3, :]
-        w2c = w2c.flatten()
+        w2c = extrinsic[:3, :].flatten()
         camera = np.concatenate([intrinsic, w2c])
         cameras.append(camera)
+        image = load_raw(image_dir / f"frame_{i:0>5}.png")
+        images.append(image)
 
     timestamps = torch.tensor(timestamps, dtype=torch.int64)
     cameras = torch.tensor(np.stack(cameras), dtype=torch.float32)
 
     return {
-        "url": url,
+        "patient_id": patient_id,
+        "study_date": study_date,
         "timestamps": timestamps,
         "cameras": cameras,
+        "images": images,
     }
 
 
@@ -112,6 +91,7 @@ if __name__ == "__main__":
     # for stage in ("train", "test"):
     for stage in ["train"]:
         keys = get_example_keys(stage)
+        print("number of keys:", len(keys))
 
         chunk_size = 0
         chunk_index = 0
@@ -136,7 +116,7 @@ if __name__ == "__main__":
             chunk = []
 
         for key in keys:
-            image_dir = INPUT_IMAGE_DIR / key / 'images_8'
+            image_dir = INPUT_IMAGE_DIR / key / 'images'
             metadata_file = INPUT_IMAGE_DIR / key / 'transforms.json'
             num_bytes = get_size(image_dir)
 
@@ -145,20 +125,7 @@ if __name__ == "__main__":
                 continue
 
             # Read images and metadata.
-            images = load_images(image_dir)
-            example = load_metadata(metadata_file)
-
-            # Merge the images into the example.
-            # from int to "frame_00001" format
-            image_names = [f"frame_{timestamp.item():0>5}" for timestamp in example["timestamps"]]
-            try:
-                example["images"] = [
-                    images[image_name] for image_name in image_names
-                ]
-            except KeyError:
-                print(f"Skipping {key} because of missing images.")
-                continue
-            assert len(example["images"]) == len(example["timestamps"]), f"len(example['images'])={len(example['images'])}, len(example['timestamps'])={len(example['timestamps'])}"
+            example = load_image_and_metadata(metadata_file)
 
             # Add the key to the example.
             example["key"] = key
@@ -177,6 +144,7 @@ if __name__ == "__main__":
         print("Generate key:torch index...")
         index = {}
         stage_path = OUTPUT_DIR / stage
+        stage_path.mkdir(exist_ok=True, parents=True)
         for chunk_path in tqdm(list(stage_path.iterdir()), desc=f"Indexing {stage_path.name}"):
             if chunk_path.suffix == ".torch":
                 chunk = torch.load(chunk_path)

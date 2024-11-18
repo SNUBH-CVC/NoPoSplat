@@ -1,0 +1,15 @@
+defaults:
+  - base_dataset
+  - view_sampler: bounded
+  - optional view_sampler_dataset_specific_config@view_sampler: bounded_re10k
+
+name: re10k
+roots: [datasets/cag_chunks]
+
+input_image_shape: [512, 512]
+original_image_shape: [512, 512]
+cameras_are_circular: false
+
+baseline_min: 1e-3
+baseline_max: 1e10
+max_fov: 100.0
