@@ -11,9 +11,9 @@ from jaxtyping import Float, Int, UInt8
 from torch import Tensor
 from tqdm import tqdm
 
-INPUT_IMAGE_DIR = Path("/workspaces/NoPoSplat/datasets/cag")
-OUTPUT_DIR = Path("/workspaces/NoPoSplat/datasets/cag_chunks")
-OUTPUT_DIR.mkdir(exist_ok=True)
+INPUT_IMAGE_DIR = Path("/workspaces/NoPoSplat/datasets/cag/val")
+OUTPUT_DIR = Path("/workspaces/NoPoSplat/datasets/cag_chunks/val")
+OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 # Target 100 MB per chunk.
 TARGET_BYTES_PER_CHUNK = int(1e8)
@@ -53,11 +53,11 @@ class Example(Metadata):
 
 
 def load_image_and_metadata(file_path: Path) -> Metadata:
+    dirname = file_path.parent.name
+    patient_id, study_date, left_right = dirname.split("_")
+
     with open(file_path, 'r') as file:
         data = json.load(file)
-
-    patient_id = data["patient_id"]
-    study_date = data["study_date"]
 
     cameras = []
     timestamps = []
@@ -65,12 +65,15 @@ def load_image_and_metadata(file_path: Path) -> Metadata:
     
     for i, frame in enumerate(data["frames"]):
         timestamps.append(i)
-
-        intrinsic = np.array(frame["intrinsic_matrix"], dtype=np.float32)
-        extrinsic = np.eye(4, dtype=np.float32)  # Placeholder: Adjust based on your requirements.
-
-        w2c = extrinsic[:3, :].flatten()
-        camera = np.concatenate([intrinsic, w2c])
+        width = frame["width"]
+        height = frame["height"]
+        fl_x = frame["intrinsic_matrix"][0][0] / width
+        fl_y = frame["intrinsic_matrix"][1][1] / height
+        cx = frame["intrinsic_matrix"][0][2]
+        cy = frame["intrinsic_matrix"][1][2]
+        intrinsic = np.array([fl_x, fl_y, cx, cy, 0, 0], dtype=np.float32)
+        extrinsic = np.array(frame["extrinsic_matrix"], dtype=np.float32)  # Placeholder: Adjust based on your requirements.
+        camera = np.concatenate([intrinsic, extrinsic.flatten()])
         cameras.append(camera)
         image = load_raw(image_dir / f"frame_{i:0>5}.png")
         images.append(image)
@@ -81,6 +84,7 @@ def load_image_and_metadata(file_path: Path) -> Metadata:
     return {
         "patient_id": patient_id,
         "study_date": study_date,
+        "left_right": left_right,
         "timestamps": timestamps,
         "cameras": cameras,
         "images": images,

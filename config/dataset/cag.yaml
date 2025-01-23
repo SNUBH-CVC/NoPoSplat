@@ -1,7 +1,6 @@
 defaults:
   - base_dataset
-  - view_sampler: bounded
-  - optional view_sampler_dataset_specific_config@view_sampler: bounded_re10k
+  - view_sampler: arbitrary
 
 name: re10k
 roots: [datasets/cag_chunks]

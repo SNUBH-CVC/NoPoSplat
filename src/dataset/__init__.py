@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 from .dataset_scannet_pose import DatasetScannetPose, DatasetScannetPoseCfgWrapper
 from ..misc.step_tracker import StepTracker
 from .dataset_re10k import DatasetRE10k, DatasetRE10kCfg, DatasetRE10kCfgWrapper, DatasetDL3DVCfgWrapper, \
-    DatasetScannetppCfgWrapper
+    DatasetScannetppCfgWrapper, DatasetCAGCfgWrapper
 from .types import Stage
 from .view_sampler import get_view_sampler
 
@@ -18,7 +18,13 @@ DATASETS: dict[str, Dataset] = {
 }
 
 
-DatasetCfgWrapper = DatasetRE10kCfgWrapper | DatasetDL3DVCfgWrapper | DatasetScannetppCfgWrapper | DatasetScannetPoseCfgWrapper
+DatasetCfgWrapper = (
+    DatasetRE10kCfgWrapper
+    | DatasetDL3DVCfgWrapper
+    | DatasetScannetppCfgWrapper
+    | DatasetScannetPoseCfgWrapper
+    | DatasetCAGCfgWrapper
+)
 DatasetCfg = DatasetRE10kCfg
 
 

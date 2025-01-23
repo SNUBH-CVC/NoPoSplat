@@ -46,6 +46,11 @@ class DatasetDL3DVCfgWrapper:
 
 
 @dataclass
+class DatasetCAGCfgWrapper:
+    cag: DatasetRE10kCfg
+
+
+@dataclass
 class DatasetScannetppCfgWrapper:
     scannetpp: DatasetRE10kCfg
 
@@ -127,10 +132,12 @@ class DatasetRE10k(IterableDataset):
                     )
                 except ValueError:
                     # Skip because the example doesn't have enough frames.
+                    print(f"Skipped {scene} because of insufficient frames.")
                     continue
 
                 # Skip the example if the field of view is too wide.
                 if (get_fov(intrinsics).rad2deg() > self.cfg.max_fov).any():
+                    print(f"Skipped {scene} because of wide field of view.")
                     continue
 
                 # Load the images.
@@ -149,6 +156,7 @@ class DatasetRE10k(IterableDataset):
                     print(f"Skipped bad example {example['key']}.")  # DL3DV-Full have some bad images
                     continue
 
+                # 원본 shape과 비교하는 과정
                 # Skip the example if the images don't have the right shape.
                 context_image_invalid = context_images.shape[1:] != (3, *self.cfg.original_image_shape)
                 target_image_invalid = target_images.shape[1:] != (3, *self.cfg.original_image_shape)
